@@ -1,3 +1,4 @@
+use axum::Server;
 use clap::Args;
 use eyre::WrapErr;
 use sqlx::{
@@ -5,7 +6,10 @@ use sqlx::{
     ConnectOptions, Connection, PgConnection,
 };
 use std::{net::SocketAddr, path::PathBuf};
+use tokio::signal;
 use tracing::{info, instrument, log::LevelFilter};
+
+mod http;
 
 const APPLICATION_NAME: &'static str =
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
@@ -13,6 +17,14 @@ const APPLICATION_NAME: &'static str =
 /// Launch the server
 pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
     let _db = args.connect("postgres").await?;
+
+    // Launch the server
+    info!(address = %args.management_address, "listening and ready to handle requests");
+    Server::bind(&args.management_address)
+        .serve(http::router().into_make_service())
+        .with_graceful_shutdown(shutdown())
+        .await
+        .wrap_err("failed to start server")?;
 
     Ok(())
 }
@@ -95,6 +107,31 @@ struct DatabaseOptions {
         env = "DATABASE_SSL_MODE"
     )]
     pub ssl_mode: PgSslMode,
+}
+
+/// Wait for signals for terminating
+async fn shutdown() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install ctrl+c handler")
+    };
+    let terminate = async {
+        use signal::unix::SignalKind;
+
+        signal::unix::signal(SignalKind::terminate())
+            .expect("failed to install sigterm handler")
+            .recv()
+            .await
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("server successfully shutdown");
+    info!("goodbye! :)");
 }
 
 fn non_empty_optional_string(str: Option<&String>) -> Option<&String> {
