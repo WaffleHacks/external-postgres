@@ -11,6 +11,7 @@ clap = { version = "4.1.6", features = ["derive", "env"] }
 color-eyre = "0.6.2"
 dotenvy = "0.15.6"
 eyre = "0.6.8"
+parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 sqlx = { version = "0.6.2", features = ["macros", "migrate", "postgres", "runtime-tokio-rustls"] }
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
 tower-http = { version = "0.3.5", default-features = false, features = ["request-id", "trace"] }
