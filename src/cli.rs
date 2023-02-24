@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand};
+use crate::server::ServerArgs;
+use clap::{Parser, Subcommand};
 use std::net::SocketAddr;
 use tracing::Level;
 
@@ -21,17 +22,5 @@ pub struct Cli {
 #[command(rename_all = "kebab-case")]
 pub enum Command {
     /// Launch the server
-    Run(RunArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct RunArgs {
-    /// The address for the management server to listen on
-    #[arg(
-        short,
-        long,
-        default_value = "127.0.0.1:8032",
-        env = "MANAGEMENT_ADDRESS"
-    )]
-    pub management_address: SocketAddr,
+    Run(ServerArgs),
 }

@@ -1,11 +1,12 @@
 use clap::Parser;
 use dotenvy::dotenv;
-use tracing::info;
+use tracing::debug;
 
 mod cli;
 mod logging;
+mod server;
 
-use cli::Cli;
+use cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -13,8 +14,11 @@ async fn main() -> eyre::Result<()> {
     let args = Cli::parse();
 
     logging::init(args.log_level)?;
+    debug!(?args);
 
-    info!(?args);
+    match args.command {
+        Command::Run(args) => server::launch(args).await?,
+    }
 
     Ok(())
 }
