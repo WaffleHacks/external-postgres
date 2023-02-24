@@ -2,7 +2,7 @@ use clap::Args;
 use eyre::WrapErr;
 use sqlx::{
     postgres::{PgConnectOptions, PgSslMode},
-    ConnectOptions, PgPool,
+    ConnectOptions, Connection, PgConnection,
 };
 use std::{net::SocketAddr, path::PathBuf};
 use tracing::{info, instrument, log::LevelFilter};
@@ -12,7 +12,7 @@ const APPLICATION_NAME: &'static str =
 
 /// Launch the server
 pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
-    let _db = args.connect().await?;
+    let _db = args.connect("postgres").await?;
 
     Ok(())
 }
@@ -35,12 +35,13 @@ pub struct ServerArgs {
 impl ServerArgs {
     /// Connect to the database
     #[instrument(skip_all)]
-    pub async fn connect(&self) -> eyre::Result<PgPool> {
+    pub async fn connect(&self, database: &str) -> eyre::Result<PgConnection> {
         let mut options = PgConnectOptions::new()
             .application_name(APPLICATION_NAME)
             .port(self.database.port)
             .username(&self.database.username)
-            .ssl_mode(self.database.ssl_mode);
+            .ssl_mode(self.database.ssl_mode)
+            .database(database);
         options.log_statements(LevelFilter::Debug);
 
         if let Some(password) = non_empty_optional_string(self.database.password.as_ref()) {
@@ -53,10 +54,13 @@ impl ServerArgs {
             options = options.socket(&self.database.socket);
         }
 
-        let db = PgPool::connect_with(options)
+        let mut db = PgConnection::connect_with(&options)
             .await
             .wrap_err("failed to connect to database")?;
-        info!("database connected");
+        info!("database connection opened");
+
+        db.ping().await.wrap_err("failed to ping database")?;
+        info!("connection works!");
 
         Ok(db)
     }
