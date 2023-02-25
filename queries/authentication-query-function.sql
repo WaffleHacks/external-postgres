@@ -1,7 +1,4 @@
--- Sets up the pgbouncer schema for authentication
-CREATE SCHEMA IF NOT EXISTS pgbouncer;
-GRANT USAGE ON SCHEMA pgbouncer TO pgbouncer;
-
+-- Sets up the user lookup function
 CREATE OR REPLACE FUNCTION pgbouncer.user_lookup(in i_username text, out uname text, out phash text)
     RETURNS record AS $$
 BEGIN
@@ -10,6 +7,3 @@ BEGIN
     RETURN;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM public, pgbouncer;
-GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO pgbouncer;

@@ -12,9 +12,10 @@ color-eyre = "0.6.2"
 dotenvy = "0.15.6"
 eyre = "0.6.8"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
-sqlx = { version = "0.6.2", features = ["macros", "migrate", "postgres", "runtime-tokio-rustls"] }
+sqlx = { version = "0.6.2", features = ["macros", "migrate", "offline", "postgres", "runtime-tokio-rustls"] }
+thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
-tower-http = { version = "0.3.5", default-features = false, features = ["request-id", "trace"] }
+tower-http = { version = "0.4.0", default-features = false, features = ["request-id", "trace"] }
 tracing = { version = "0.1.37", features = ["log"] }
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "registry"] }

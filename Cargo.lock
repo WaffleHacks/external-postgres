@@ -79,7 +79,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tower",
- "tower-http",
+ "tower-http 0.3.5",
  "tower-layer",
  "tower-service",
 ]
@@ -332,6 +332,9 @@ name = "either"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fcaabb2fef8c910e7f4c7ce9f67a1283a1715879a7c230ca9d6d1ae31f16d91"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "errno"
@@ -371,8 +374,9 @@ dependencies = [
  "eyre",
  "parking_lot 0.12.1",
  "sqlx",
+ "thiserror",
  "tokio",
- "tower-http",
+ "tower-http 0.4.0",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
@@ -1368,9 +1372,12 @@ dependencies = [
  "dotenvy",
  "either",
  "heck",
+ "hex",
  "once_cell",
  "proc-macro2",
  "quote",
+ "serde",
+ "serde_json",
  "sha2",
  "sqlx-core",
  "sqlx-rt",
@@ -1579,6 +1586,24 @@ dependencies = [
  "http-range-header",
  "pin-project-lite",
  "tower",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d1d42a9b3f3ec46ba828e8d376aec14592ea199f70a06a548587ecd1c4ab658"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-range-header",
+ "pin-project-lite",
  "tower-layer",
  "tower-service",
  "tracing",

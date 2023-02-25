@@ -2,10 +2,10 @@ use clap::Args;
 use parking_lot::RwLock;
 use sqlx::{
     postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgSslMode},
-    query, query_file_as, ConnectOptions,
+    query, query_file, query_file_as, ConnectOptions,
 };
-use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc, time::Duration};
-use tracing::{info, instrument, log::LevelFilter, warn};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use tracing::{error, info, instrument, log::LevelFilter, warn};
 
 const APPLICATION_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
@@ -52,11 +52,12 @@ pub struct Options {
 #[derive(Clone, Debug)]
 pub struct Databases {
     options: Arc<PgConnectOptions>,
+    default_dbname: String,
     pools: Arc<RwLock<HashMap<String, PgPool>>>,
 }
 
 impl Databases {
-    pub async fn new(opts: &Options) -> sqlx::Result<Self> {
+    pub async fn new(opts: &Options) -> Result<Self> {
         // Construct the connection options
         let mut options = PgConnectOptions::new()
             .application_name(APPLICATION_NAME)
@@ -78,20 +79,34 @@ impl Databases {
         let databases = Databases {
             options: Arc::new(options),
             pools: Arc::new(RwLock::new(HashMap::new())),
+            default_dbname: opts.default_dbname.clone(),
         };
-        databases.ensure_configuration(&opts.default_dbname).await?;
+        databases.ensure_configuration(&opts.username).await?;
 
         Ok(databases)
     }
 
-    /// Ensure the connecting user has the proper permissions
+    /// Ensure the pgbouncer user is setup and the connecting user has the correct permissions
     #[instrument(skip(self))]
-    async fn ensure_configuration(&self, database: &str) -> sqlx::Result<()> {
-        let default = self.get(database).await?;
+    async fn ensure_configuration(&self, connecting_user: &str) -> Result<()> {
+        let default = self.get(&self.default_dbname).await?;
+
+        // Ensure the connecting user has the correct permissions
+        let connecting_user = query_file_as!(User, "queries/user-permissions.sql", connecting_user)
+            .fetch_one(&default.pool)
+            .await?;
+        if !(connecting_user.create_role && connecting_user.create_db) {
+            error!(
+                "user {:?} must have create role and create db permissions",
+                connecting_user.username
+            );
+            return Err(Error::InvalidPermissions);
+        }
+        info!("current user has required permissions");
 
         // Ensure the pgbouncer user exists
         let pgbouncer = query_file_as!(User, "queries/user-permissions.sql", "pgbouncer")
-            .fetch_optional(&*default)
+            .fetch_optional(&default.pool)
             .await?;
 
         match pgbouncer {
@@ -110,7 +125,7 @@ impl Databases {
             }
             None => {
                 warn!("pgbouncer user does not exist, creating...");
-                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS").execute(&*default).await?;
+                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS").execute(&default.pool).await?;
             }
         }
 
@@ -119,7 +134,7 @@ impl Databases {
 
     /// Fetch a connection pool for the specified database
     #[instrument(skip(self))]
-    pub async fn get(&self, database: &str) -> sqlx::Result<Database> {
+    pub async fn get(&self, database: &str) -> Result<Database> {
         {
             let pools = self.pools.read();
             if let Some(pool) = pools.get(database) {
@@ -139,7 +154,7 @@ impl Databases {
     }
 
     /// Open a new connection to the database
-    async fn open(&self, database: &str) -> sqlx::Result<PgPool> {
+    async fn open(&self, database: &str) -> Result<PgPool> {
         let options = self.options.as_ref().clone().database(database);
 
         // Create a pool with a single short-lived connection as we will
@@ -192,10 +207,55 @@ pub struct Database {
     pool: PgPool,
 }
 
-impl Deref for Database {
-    type Target = PgPool;
+impl Database {
+    /// Ensure the pgbouncer schema exists and has the proper permissions
+    #[instrument(skip_all)]
+    pub async fn ensure_schema(&self) -> Result<()> {
+        query!("CREATE SCHEMA IF NOT EXISTS pgbouncer")
+            .execute(&self.pool)
+            .await?;
 
-    fn deref(&self) -> &Self::Target {
-        &self.pool
+        query!("GRANT USAGE ON SCHEMA pgbouncer TO pgbouncer")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
+
+    /// Ensure the authentication function exists and has the proper permissions
+    #[instrument(skip_all)]
+    pub async fn ensure_authentication_query(&self) -> Result<()> {
+        let schema = query!("SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'pgbouncer'")
+            .fetch_one(&self.pool)
+            .await?;
+        let user_lookup =
+            query!("SELECT oid FROM pg_catalog.pg_proc WHERE proname = 'user_lookup' AND pronamespace = $1", schema.oid)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        if user_lookup.is_none() {
+            query_file!("queries/authentication-query-function.sql")
+                .execute(&self.pool)
+                .await?;
+        }
+
+        query!("REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM public, pgbouncer")
+            .execute(&self.pool)
+            .await?;
+        query!("GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO pgbouncer")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+}
+
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid permissions for connected user")]
+    InvalidPermissions,
+    #[error(transparent)]
+    Internal(#[from] sqlx::Error),
 }
