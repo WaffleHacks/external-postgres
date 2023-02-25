@@ -53,8 +53,10 @@ pub struct Options {
 #[derive(Clone, Debug)]
 pub struct Databases {
     options: Arc<PgConnectOptions>,
-    default_dbname: String,
     pools: Arc<RwLock<HashMap<String, PgPool>>>,
+
+    default_dbname: String,
+    default_username: String,
 }
 
 impl Databases {
@@ -81,6 +83,7 @@ impl Databases {
             options: Arc::new(options),
             pools: Arc::new(RwLock::new(HashMap::new())),
             default_dbname: opts.default_dbname.clone(),
+            default_username: opts.username.clone(),
         };
         databases.ensure_configuration(&opts.username).await?;
 
@@ -225,8 +228,8 @@ impl Databases {
         Ok(pool)
     }
 
-    /// Release connection pool for the specified database
-    pub async fn release(&self, database: &str) {
+    /// Remove a database from being managed. If `retain` is true, the database will not be dropped.
+    pub async fn remove(&self, database: &str, retain: bool) -> Result<()> {
         let pool = {
             let mut pools = self.pools.write();
             pools.remove(database)
@@ -235,6 +238,25 @@ impl Databases {
         if let Some(pool) = pool {
             pool.close().await;
         }
+
+        let default = self.get(&self.default_dbname).await?;
+
+        let sql = if retain {
+            format!(
+                "ALTER DATABASE {database} OWNER TO {}",
+                &self.default_username
+            )
+        } else {
+            format!("DROP DATABASE {database}")
+        };
+        query(&sql).execute(&default.pool).await?;
+
+        // Remove the user
+        query(&format!("DROP USER {database}"))
+            .execute(&default.pool)
+            .await?;
+
+        Ok(())
     }
 }
 
