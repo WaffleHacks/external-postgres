@@ -1,5 +1,6 @@
 use clap::Args;
 use parking_lot::RwLock;
+use rand::distributions::{Alphanumeric, DistString};
 use sqlx::{
     postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgSslMode},
     query, query_file, query_file_as, ConnectOptions,
@@ -125,11 +126,52 @@ impl Databases {
             }
             None => {
                 warn!("pgbouncer user does not exist, creating...");
-                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS").execute(&default.pool).await?;
+                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS")
+                    .execute(&default.pool)
+                    .await?;
             }
         }
 
         Ok(())
+    }
+
+    /// Ensure the database and corresponding user exist, returns a connection to the database
+    /// and the user's password (if the user was just created)
+    #[instrument(skip(self))]
+    pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
+        let default = self.get(&self.default_dbname).await?;
+
+        // Ensure the user exists
+        let user = query_file_as!(User, "queries/user-permissions.sql", database)
+            .fetch_optional(&default.pool)
+            .await?;
+        let password = match user {
+            Some(_) => None,
+            None => {
+                let password = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
+                query(&format!("CREATE USER {database} WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS"))
+                    .execute(&default.pool)
+                    .await?;
+                Some(password)
+            }
+        };
+
+        // Ensure the database exists
+        let db = query!(
+            "SELECT oid FROM pg_catalog.pg_database WHERE datname = $1",
+            database
+        )
+        .fetch_optional(&default.pool)
+        .await?;
+        if db.is_none() {
+            query(&format!("CREATE DATABASE {database} WITH OWNER {database}"))
+                .execute(&default.pool)
+                .await?;
+        }
+
+        // Acquire the database pool
+        let pool = self.get(database).await?;
+        Ok((pool, password))
     }
 
     /// Fetch a connection pool for the specified database
