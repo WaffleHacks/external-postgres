@@ -6,13 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = { version = "0.6.7", default-features = false, features = ["http1", "http2", "tokio"] }
+axum = { version = "0.6.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
 clap = { version = "4.1.6", features = ["derive", "env"] }
 color-eyre = "0.6.2"
 dotenvy = "0.15.6"
 eyre = "0.6.8"
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 rand = "0.8.5"
+serde = { version = "1.0.152", features = ["derive"] }
 sqlx = { version = "0.6.2", features = ["macros", "migrate", "offline", "postgres", "runtime-tokio-rustls"] }
 thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }

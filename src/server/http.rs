@@ -9,6 +9,8 @@ use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, MakeSpan, TraceLaye
 use tracing::{span, Level, Span};
 use uuid::Uuid;
 
+mod error;
+
 #[derive(Clone)]
 pub struct AppState {
     databases: Databases,
@@ -33,11 +35,11 @@ pub fn router(databases: Databases) -> Router {
         .with_state(AppState { databases })
 }
 
-async fn health(State(databases): State<Databases>) -> StatusCode {
-    let default = databases.get_default().await.unwrap();
-    default.ping().await.unwrap();
+async fn health(State(databases): State<Databases>) -> error::Result<StatusCode> {
+    let default = databases.get_default().await?;
+    default.ping().await?;
 
-    StatusCode::NO_CONTENT
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Clone, Copy, Debug)]
