@@ -1,5 +1,10 @@
 use super::database::Databases;
-use axum::{extract::FromRef, http::Request, Router};
+use axum::{
+    extract::{FromRef, State},
+    http::{Request, StatusCode},
+    routing::get,
+    Router,
+};
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, MakeSpan, TraceLayer};
 use tracing::{span, Level, Span};
 use uuid::Uuid;
@@ -7,6 +12,7 @@ use uuid::Uuid;
 /// Build the router for the management interface
 pub fn router(databases: Databases) -> Router {
     Router::new()
+        .route("/health", get(health))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(MakeSpanWithId)
@@ -27,6 +33,13 @@ impl FromRef<AppState> for Databases {
     }
 }
 
+async fn health(State(databases): State<Databases>) -> StatusCode {
+    let default = databases.get_default().await.unwrap();
+    default.ping().await.unwrap();
+
+    StatusCode::NO_CONTENT
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MakeSpanWithId;
 
@@ -34,7 +47,7 @@ impl<B> MakeSpan<B> for MakeSpanWithId {
     fn make_span(&mut self, request: &Request<B>) -> Span {
         span!(
             Level::INFO,
-            "external-postgres::request",
+            "external_postgres::request",
             method = %request.method(),
             uri = %request.uri(),
             version = ?request.version(),

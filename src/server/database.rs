@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use rand::distributions::{Alphanumeric, DistString};
 use sqlx::{
     postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgSslMode},
-    query, query_file, query_file_as, ConnectOptions,
+    query, query_file, query_file_as, ConnectOptions, Connection,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{error, info, instrument, log::LevelFilter, warn};
@@ -93,7 +93,7 @@ impl Databases {
     /// Ensure the pgbouncer user is setup and the connecting user has the correct permissions
     #[instrument(skip(self))]
     async fn ensure_configuration(&self, connecting_user: &str) -> Result<()> {
-        let default = self.get(&self.default_dbname).await?;
+        let default = self.get_default().await?;
 
         // Ensure the connecting user has the correct permissions
         let connecting_user = query_file_as!(User, "queries/user-permissions.sql", connecting_user)
@@ -154,7 +154,7 @@ impl Databases {
     /// and the user's password (if the user was just created)
     #[instrument(skip(self))]
     pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
-        let default = self.get(&self.default_dbname).await?;
+        let default = self.get_default().await?;
 
         // Ensure the user exists
         let user = query_file_as!(User, "queries/user-permissions.sql", database)
@@ -187,6 +187,12 @@ impl Databases {
         // Acquire the database pool
         let pool = self.get(database).await?;
         Ok((pool, password))
+    }
+
+    /// Get the default database
+    #[instrument(skip_all)]
+    pub(crate) async fn get_default(&self) -> Result<Database> {
+        self.get(&self.default_dbname).await
     }
 
     /// Fetch a connection pool for the specified database
@@ -239,7 +245,7 @@ impl Databases {
             pool.close().await;
         }
 
-        let default = self.get(&self.default_dbname).await?;
+        let default = self.get_default().await?;
 
         let sql = if retain {
             format!(
@@ -284,6 +290,15 @@ pub struct Database {
 }
 
 impl Database {
+    /// Test the database connection
+    #[instrument(skip_all)]
+    pub(crate) async fn ping(&self) -> Result<()> {
+        let mut connection = self.pool.acquire().await?;
+        connection.ping().await?;
+
+        Ok(())
+    }
+
     /// Ensure the pgbouncer schema exists and has the proper permissions
     #[instrument(skip_all)]
     pub async fn ensure_schema(&self) -> Result<()> {
