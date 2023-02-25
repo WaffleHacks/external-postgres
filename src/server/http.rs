@@ -9,6 +9,17 @@ use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, MakeSpan, TraceLaye
 use tracing::{span, Level, Span};
 use uuid::Uuid;
 
+#[derive(Clone)]
+pub struct AppState {
+    databases: Databases,
+}
+
+impl FromRef<AppState> for Databases {
+    fn from_ref(input: &AppState) -> Self {
+        input.databases.clone()
+    }
+}
+
 /// Build the router for the management interface
 pub fn router(databases: Databases) -> Router {
     Router::new()
@@ -20,17 +31,6 @@ pub fn router(databases: Databases) -> Router {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .with_state(AppState { databases })
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    databases: Databases,
-}
-
-impl FromRef<AppState> for Databases {
-    fn from_ref(input: &AppState) -> Self {
-        input.databases.clone()
-    }
 }
 
 async fn health(State(databases): State<Databases>) -> StatusCode {
