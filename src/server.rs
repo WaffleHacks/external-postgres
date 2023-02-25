@@ -12,12 +12,14 @@ use database::Databases;
 
 /// Launch the server
 pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
-    let connector = Databases::from(&args.database);
+    let databases = Databases::new(&args.database)
+        .await
+        .wrap_err("failed to connect to database")?;
 
     // Launch the server
     info!(address = %args.management_address, "listening and ready to handle requests");
     Server::bind(&args.management_address)
-        .serve(http::router(connector).into_make_service())
+        .serve(http::router(databases).into_make_service())
         .with_graceful_shutdown(shutdown())
         .await
         .wrap_err("failed to start server")?;

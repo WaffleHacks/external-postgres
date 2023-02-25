@@ -2,15 +2,23 @@ use clap::Args;
 use parking_lot::RwLock;
 use sqlx::{
     postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgSslMode},
-    ConnectOptions,
+    query, query_file_as, ConnectOptions,
 };
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
-use tracing::{info, instrument, log::LevelFilter};
+use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc, time::Duration};
+use tracing::{info, instrument, log::LevelFilter, warn};
 
 const APPLICATION_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Args)]
 pub struct Options {
+    /// The default database to connect to
+    #[arg(
+        long = "database-default-dbname",
+        default_value = "postgres",
+        env = "DATABASE_DEFAULT_DBNAME"
+    )]
+    pub default_dbname: String,
+
     /// The path to the socket directory
     #[arg(long = "database-socket-dir", env = "DATABASE_SOCKET_DIR")]
     pub socket: PathBuf,
@@ -48,13 +56,74 @@ pub struct Databases {
 }
 
 impl Databases {
+    pub async fn new(opts: &Options) -> sqlx::Result<Self> {
+        // Construct the connection options
+        let mut options = PgConnectOptions::new()
+            .application_name(APPLICATION_NAME)
+            .port(opts.port)
+            .username(&opts.username)
+            .ssl_mode(opts.ssl_mode);
+        options.log_statements(LevelFilter::Debug);
+
+        if let Some(password) = opts.password.as_ref().and_then(non_empty_optional) {
+            options = options.password(password);
+        }
+
+        if let Some(host) = opts.host.as_ref().and_then(non_empty_optional) {
+            options = options.host(host);
+        } else {
+            options = options.socket(&opts.socket);
+        }
+
+        let databases = Databases {
+            options: Arc::new(options),
+            pools: Arc::new(RwLock::new(HashMap::new())),
+        };
+        databases.ensure_configuration(&opts.default_dbname).await?;
+
+        Ok(databases)
+    }
+
+    /// Ensure the connecting user has the proper permissions
+    #[instrument(skip(self))]
+    async fn ensure_configuration(&self, database: &str) -> sqlx::Result<()> {
+        let default = self.get(database).await?;
+
+        // Ensure the pgbouncer user exists
+        let pgbouncer = query_file_as!(User, "queries/user-permissions.sql", "pgbouncer")
+            .fetch_optional(&*default)
+            .await?;
+
+        match pgbouncer {
+            Some(user) => {
+                info!(
+                    %user.can_login,
+                    %user.create_db,
+                    %user.create_role,
+                    %user.bypass_rls,
+                    %user.superuser,
+                    "pgbouncer user already exists"
+                );
+                if !user.can_login {
+                    warn!("pgbouncer user should be able to login");
+                }
+            }
+            None => {
+                warn!("pgbouncer user does not exist, creating...");
+                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS").execute(&*default).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Fetch a connection pool for the specified database
     #[instrument(skip(self))]
-    pub async fn get(&self, database: &str) -> sqlx::Result<PgPool> {
+    pub async fn get(&self, database: &str) -> sqlx::Result<Database> {
         {
             let pools = self.pools.read();
             if let Some(pool) = pools.get(database) {
-                return Ok(pool.clone());
+                return Ok(Database { pool: pool.clone() });
             }
         }
 
@@ -66,7 +135,7 @@ impl Databases {
             pools.insert(database.to_string(), stored);
         }
 
-        Ok(pool)
+        Ok(Database { pool })
     }
 
     /// Open a new connection to the database
@@ -100,35 +169,33 @@ impl Databases {
     }
 }
 
-impl From<&Options> for Databases {
-    fn from(opts: &Options) -> Self {
-        let mut options = PgConnectOptions::new()
-            .application_name(APPLICATION_NAME)
-            .port(opts.port)
-            .username(&opts.username)
-            .ssl_mode(opts.ssl_mode);
-        options.log_statements(LevelFilter::Debug);
-
-        if let Some(password) = opts.password.as_ref().and_then(non_empty_optional) {
-            options = options.password(password);
-        }
-
-        if let Some(host) = opts.host.as_ref().and_then(non_empty_optional) {
-            options = options.host(host);
-        } else {
-            options = options.socket(&opts.socket);
-        }
-
-        Databases {
-            options: Arc::new(options),
-            pools: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
+#[derive(Debug)]
+struct User {
+    username: String,
+    can_login: bool,
+    create_role: bool,
+    create_db: bool,
+    bypass_rls: bool,
+    superuser: bool,
 }
 
 fn non_empty_optional(s: &String) -> Option<&String> {
     match s.is_empty() {
         true => None,
         false => Some(s),
+    }
+}
+
+/// A convince wrapper around a connection pool
+#[derive(Clone, Debug)]
+pub struct Database {
+    pool: PgPool,
+}
+
+impl Deref for Database {
+    type Target = PgPool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pool
     }
 }
