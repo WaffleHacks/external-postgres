@@ -135,6 +135,18 @@ impl Databases {
         Ok(())
     }
 
+    /// Get a list of all the managed databases
+    pub fn managed_databases(&self) -> Vec<String> {
+        let pools = self.pools.read();
+        pools.keys().map(|d| d.to_owned()).collect()
+    }
+
+    /// Check if the given database is managed by external-postgres
+    pub fn is_managed(&self, database: &str) -> bool {
+        let pools = self.pools.read();
+        pools.contains_key(database)
+    }
+
     /// Ensure the database and corresponding user exist, returns a connection to the database
     /// and the user's password (if the user was just created)
     #[instrument(skip(self))]
