@@ -7,7 +7,7 @@ use url::Url;
 #[command(author, version, about)]
 pub struct Cli {
     /// The minimum level to log at, one of: trace|debug|info|warn|error
-    #[arg(short, long, default_value_t = Level::INFO, env = "LOG_LEVEL")]
+    #[arg(short, long, default_value_t = Level::INFO)]
     pub log_level: Level,
 
     /// The address of the management server
