@@ -1,4 +1,5 @@
 use super::database::Databases;
+use std::fmt::{Debug, Formatter};
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -61,7 +62,6 @@ impl Controller {
 }
 
 /// A command sent to the controller
-#[derive(Debug)]
 enum Command {
     Create {
         database: String,
@@ -73,6 +73,26 @@ enum Command {
         retain: bool,
     },
     Halt,
+}
+
+impl Debug for Command {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Command::Create { database, .. } => f
+                .debug_struct("Create")
+                .field("database", database)
+                .finish(),
+            Command::Check(database) => {
+                f.debug_struct("Check").field("database", database).finish()
+            }
+            Command::Remove { database, retain } => f
+                .debug_struct("Remove")
+                .field("database", database)
+                .field("retain", retain)
+                .finish(),
+            Command::Halt => write!(f, "Halt"),
+        }
+    }
 }
 
 #[instrument(skip_all)]
