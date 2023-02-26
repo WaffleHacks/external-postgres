@@ -51,9 +51,12 @@ pub struct Options {
 
 /// Manage the connection pools of different databases on the specified server
 #[derive(Clone, Debug)]
-pub struct Databases {
-    options: Arc<PgConnectOptions>,
-    pools: Arc<RwLock<HashMap<String, PgPool>>>,
+pub struct Databases(Arc<DatabasesInner>);
+
+#[derive(Debug)]
+struct DatabasesInner {
+    options: PgConnectOptions,
+    pools: RwLock<HashMap<String, PgPool>>,
 
     default_dbname: String,
     default_username: String,
@@ -79,12 +82,12 @@ impl Databases {
             options = options.socket(&opts.socket);
         }
 
-        let databases = Databases {
-            options: Arc::new(options),
-            pools: Arc::new(RwLock::new(HashMap::new())),
+        let databases = Databases(Arc::new(DatabasesInner {
+            options,
+            pools: RwLock::new(HashMap::new()),
             default_dbname: opts.default_dbname.clone(),
             default_username: opts.username.clone(),
-        };
+        }));
         databases.ensure_configuration(&opts.username).await?;
 
         Ok(databases)
@@ -140,13 +143,13 @@ impl Databases {
 
     /// Get a list of all the managed databases
     pub fn managed_databases(&self) -> Vec<String> {
-        let pools = self.pools.read();
+        let pools = self.0.pools.read();
         pools.keys().map(|d| d.to_owned()).collect()
     }
 
     /// Check if the given database is managed by external-postgres
     pub fn is_managed(&self, database: &str) -> bool {
-        let pools = self.pools.read();
+        let pools = self.0.pools.read();
         pools.contains_key(database)
     }
 
@@ -154,7 +157,7 @@ impl Databases {
     /// and the user's password (if the user was just created)
     #[instrument(skip(self))]
     pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
-        if database == &self.default_dbname {
+        if database == &self.0.default_dbname {
             return Err(Error::DefaultDatabase);
         }
 
@@ -196,14 +199,14 @@ impl Databases {
     /// Get the default database
     #[instrument(skip_all)]
     pub(crate) async fn get_default(&self) -> Result<Database> {
-        self.get(&self.default_dbname).await
+        self.get(&self.0.default_dbname).await
     }
 
     /// Fetch a connection pool for the specified database
     #[instrument(skip(self))]
     pub async fn get(&self, database: &str) -> Result<Database> {
         {
-            let pools = self.pools.read();
+            let pools = self.0.pools.read();
             if let Some(pool) = pools.get(database) {
                 return Ok(Database { pool: pool.clone() });
             }
@@ -213,7 +216,7 @@ impl Databases {
         let stored = pool.clone();
 
         {
-            let mut pools = self.pools.write();
+            let mut pools = self.0.pools.write();
             pools.insert(database.to_string(), stored);
         }
 
@@ -222,7 +225,7 @@ impl Databases {
 
     /// Open a new connection to the database
     async fn open(&self, database: &str) -> Result<PgPool> {
-        let options = self.options.as_ref().clone().database(database);
+        let options = self.0.options.clone().database(database);
 
         // Create a pool with a single short-lived connection as we will
         // 1. only be performing actions one-at-a-time
@@ -240,12 +243,12 @@ impl Databases {
 
     /// Remove a database from being managed. If `retain` is true, the database will not be dropped.
     pub async fn remove(&self, database: &str, retain: bool) -> Result<()> {
-        if database == &self.default_dbname {
+        if database == &self.0.default_dbname {
             return Err(Error::DefaultDatabase);
         }
 
         let pool = {
-            let mut pools = self.pools.write();
+            let mut pools = self.0.pools.write();
             pools.remove(database)
         };
 
@@ -258,7 +261,7 @@ impl Databases {
         let sql = if retain {
             format!(
                 "ALTER DATABASE {database} OWNER TO {}",
-                &self.default_username
+                &self.0.default_username
             )
         } else {
             format!("DROP DATABASE {database}")
