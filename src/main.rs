@@ -3,7 +3,10 @@ use dotenvy::dotenv;
 use tracing::debug;
 
 mod cli;
+mod client;
+mod constants;
 mod logging;
+mod models;
 mod server;
 
 use cli::{Cli, Command};
@@ -18,6 +21,7 @@ async fn main() -> eyre::Result<()> {
 
     match args.command {
         Command::Run(args) => server::launch(args).await?,
+        Command::Database(command) => client::database(args.address, command).await?,
     }
 
     Ok(())

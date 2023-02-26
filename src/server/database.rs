@@ -1,3 +1,4 @@
+use crate::constants::APPLICATION_NAME;
 use clap::Args;
 use parking_lot::RwLock;
 use rand::distributions::{Alphanumeric, DistString};
@@ -7,8 +8,6 @@ use sqlx::{
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tracing::{error, info, instrument, log::LevelFilter, warn};
-
-const APPLICATION_NAME: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Args)]
 pub struct Options {
