@@ -1,9 +1,10 @@
 use crate::{client::DatabaseCommand, server::ServerArgs};
 use clap::{Parser, Subcommand};
+use std::fmt::{Debug, Formatter};
 use tracing::Level;
 use url::Url;
 
-#[derive(Debug, Parser)]
+#[derive(Parser)]
 #[command(author, version, about)]
 pub struct Cli {
     /// The minimum level to log at, one of: trace|debug|info|warn|error
@@ -16,6 +17,16 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Debug for Cli {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cli")
+            .field("log_level", &self.log_level.as_str())
+            .field("address", &self.address.as_str())
+            .field("command", &self.command)
+            .finish()
+    }
 }
 
 #[derive(Debug, Subcommand)]
