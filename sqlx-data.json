@@ -128,6 +128,26 @@
     },
     "query": "SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'pgbouncer'"
   },
+  "bc526e442532558557f425a39a5bf22c9fcfcd36200773c63ab4f4699e955c07": {
+    "describe": {
+      "columns": [
+        {
+          "name": "oid",
+          "ordinal": 0,
+          "type_info": "Oid"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Name"
+        ]
+      }
+    },
+    "query": "SELECT oid FROM pg_catalog.pg_database WHERE datname = $1"
+  },
   "c3d83cf96afe0625bbce0723ede2309cec340fcaab5a8b168381249e0af5d72a": {
     "describe": {
       "columns": [],
