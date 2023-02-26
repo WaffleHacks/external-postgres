@@ -2,7 +2,7 @@ use super::{controller::Controller, database::Databases};
 use axum::{
     extract::{FromRef, State},
     http::{Request, StatusCode},
-    routing::{delete, get},
+    routing::{get, put},
     Router,
 };
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, MakeSpan, TraceLayer};
@@ -35,7 +35,10 @@ pub fn router(controller: Controller, databases: Databases) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/databases", get(database::list).post(database::create))
-        .route("/databases/:database", delete(database::delete))
+        .route(
+            "/databases/:database",
+            put(database::check).delete(database::delete),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(MakeSpanWithId)

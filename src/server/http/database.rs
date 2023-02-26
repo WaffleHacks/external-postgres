@@ -31,6 +31,20 @@ pub async fn create(
     Json(CreateResponse { password })
 }
 
+#[instrument(name = "database_check")]
+pub async fn check(
+    Path(name): Path<String>,
+    State(controller): State<Controller>,
+    State(databases): State<Databases>,
+) -> StatusCode {
+    if databases.is_managed(&name) {
+        controller.check(name);
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DeleteOptions {
     retain: Option<bool>,
@@ -41,8 +55,12 @@ pub async fn delete(
     Path(name): Path<String>,
     Query(options): Query<DeleteOptions>,
     State(controller): State<Controller>,
+    State(databases): State<Databases>,
 ) -> StatusCode {
-    controller.remove(name, options.retain.unwrap_or_default());
-
-    StatusCode::NO_CONTENT
+    if databases.is_managed(&name) {
+        controller.remove(name, options.retain.unwrap_or_default());
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    }
 }
