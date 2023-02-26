@@ -2,12 +2,14 @@ use axum::Server;
 use clap::Args;
 use eyre::WrapErr;
 use std::net::SocketAddr;
-use tokio::signal;
-use tracing::info;
+use tokio::{signal, task::JoinHandle};
+use tracing::{error, info};
 
+mod controller;
 mod database;
 mod http;
 
+use controller::Controller;
 use database::Databases;
 
 /// Launch the server
@@ -15,12 +17,13 @@ pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
     let databases = Databases::new(&args.database)
         .await
         .wrap_err("failed to connect to database")?;
+    let (controller, handle) = Controller::start(databases.clone());
 
     // Launch the server
     info!(address = %args.management_address, "listening and ready to handle requests");
     Server::bind(&args.management_address)
-        .serve(http::router(databases).into_make_service())
-        .with_graceful_shutdown(shutdown())
+        .serve(http::router(controller.clone(), databases).into_make_service())
+        .with_graceful_shutdown(shutdown(controller, handle))
         .await
         .wrap_err("failed to start server")?;
 
@@ -43,7 +46,7 @@ pub struct ServerArgs {
 }
 
 /// Wait for signals for terminating
-async fn shutdown() {
+async fn shutdown(controller: Controller, handle: JoinHandle<()>) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -61,6 +64,11 @@ async fn shutdown() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+
+    controller.stop();
+    if let Err(error) = handle.await {
+        error!(%error, "failed to stop controller");
     }
 
     info!("server successfully shutdown");

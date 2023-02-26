@@ -1,4 +1,4 @@
-use super::database::Databases;
+use super::{controller::Controller, database::Databases};
 use axum::{
     extract::{FromRef, State},
     http::{Request, StatusCode},
@@ -13,7 +13,14 @@ mod error;
 
 #[derive(Clone)]
 pub struct AppState {
+    controller: Controller,
     databases: Databases,
+}
+
+impl FromRef<AppState> for Controller {
+    fn from_ref(input: &AppState) -> Self {
+        input.controller.clone()
+    }
 }
 
 impl FromRef<AppState> for Databases {
@@ -23,7 +30,7 @@ impl FromRef<AppState> for Databases {
 }
 
 /// Build the router for the management interface
-pub fn router(databases: Databases) -> Router {
+pub fn router(controller: Controller, databases: Databases) -> Router {
     Router::new()
         .route("/health", get(health))
         .layer(
@@ -32,7 +39,10 @@ pub fn router(databases: Databases) -> Router {
                 .on_request(DefaultOnRequest::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .with_state(AppState { databases })
+        .with_state(AppState {
+            databases,
+            controller,
+        })
 }
 
 async fn health(State(databases): State<Databases>) -> error::Result<StatusCode> {

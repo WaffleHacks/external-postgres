@@ -154,6 +154,10 @@ impl Databases {
     /// and the user's password (if the user was just created)
     #[instrument(skip(self))]
     pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
+        if database == &self.default_dbname {
+            return Err(Error::DefaultDatabase);
+        }
+
         let default = self.get_default().await?;
 
         // Ensure the user exists
@@ -236,6 +240,10 @@ impl Databases {
 
     /// Remove a database from being managed. If `retain` is true, the database will not be dropped.
     pub async fn remove(&self, database: &str, retain: bool) -> Result<()> {
+        if database == &self.default_dbname {
+            return Err(Error::DefaultDatabase);
+        }
+
         let pool = {
             let mut pools = self.pools.write();
             pools.remove(database)
@@ -347,6 +355,8 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid permissions for connected user")]
     InvalidPermissions,
+    #[error("cannot create or remove default database")]
+    DefaultDatabase,
     #[error(transparent)]
     Internal(#[from] sqlx::Error),
 }
