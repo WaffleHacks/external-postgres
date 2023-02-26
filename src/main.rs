@@ -2,14 +2,7 @@ use clap::Parser;
 use dotenvy::dotenv;
 use tracing::debug;
 
-mod cli;
-mod client;
-mod constants;
-mod logging;
-mod models;
-mod server;
-
-use cli::{Cli, Command};
+use external_postgres::{client, logging, server, Cli, Command};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

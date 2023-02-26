@@ -3,7 +3,7 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 /// Initialize the tracing log layer
-pub(crate) fn init(default_level: Level) -> eyre::Result<()> {
+pub fn init(default_level: Level) -> eyre::Result<()> {
     color_eyre::install()?;
 
     Registry::default()
