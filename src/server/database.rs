@@ -157,7 +157,7 @@ impl Databases {
     /// and the user's password (if the user was just created)
     #[instrument(skip(self))]
     pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
-        if database == &self.0.default_dbname {
+        if database == self.0.default_dbname {
             return Err(Error::DefaultDatabase);
         }
 
@@ -243,7 +243,7 @@ impl Databases {
 
     /// Remove a database from being managed. If `retain` is true, the database will not be dropped.
     pub async fn remove(&self, database: &str, retain: bool) -> Result<()> {
-        if database == &self.0.default_dbname {
+        if database == self.0.default_dbname {
             return Err(Error::DefaultDatabase);
         }
 
