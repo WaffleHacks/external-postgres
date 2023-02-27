@@ -1,0 +1,67 @@
+---
+on:  # yamllint disable-line rule:truthy
+  push:
+    tags:
+      - "v.*.*.*"
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: full
+      RUSTC_WRAPPER: sccache
+      SCCACHE_VERSION: v0.3.3
+      SCCACHE_CACHE_SIZE: 2G
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      # SCCACHE_RECACHE: 1 # Uncomment this to clear cache, then comment it back out
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install sccache
+        run: |
+          mkdir -p $HOME/.local/bin
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+          curl -L "$BASE_URL/$SCCACHE_VERSION/$FILE.tar.gz" | tar xz
+          mv -f $FILE/sccache $HOME/.local/bin/sccache
+        env:
+          BASE_URL: https://github.com/mozilla/sccache/releases/download
+          FILE: sccache-${{ env.SCCACHE_VERSION }}-x86_64-unknown-linux-musl
+
+      - name: Cache Cargo Registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: build-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+            build-${{ runner.os }}-cargo-
+      - name: Cache sccache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: build-${{ runner.os }}-sccache-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-sccache-
+            build-${{ runner.os }}-sccache-
+
+      - name: Start sccache
+        run: sccache --start-server
+
+      - run: cargo build --release
+
+      - uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            target/release/external-postgres
+
+      - name: Show sccache stats
+        run: sccache --show-stats
+      - name: Stop sccache
+        run: sccache --stop-server || true
