@@ -1,9 +1,12 @@
+---
 apiVersion: external-postgres.wafflehacks.cloud/v1
 kind: Database
 metadata:
-  name: testing
+  name: constant
 spec:
-  password: testing
+  # Define the database user's password inline
+  password:
+    value: testing
   retainOnDelete: false
   secret:
     name: testing-database-secret

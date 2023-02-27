@@ -1,5 +1,6 @@
 use super::database::{self, Databases};
 use futures::StreamExt;
+use k8s_openapi::api::core::v1::Secret;
 use kube::{
     api::{Patch, PatchParams},
     client::Client,
@@ -127,6 +128,7 @@ impl Operator {
             .run(
                 |database, _| {
                     let databases_api = Api::<Database>::all(client.clone());
+                    let client = client.clone();
                     let databases = self.0.databases.clone();
                     async move {
                         finalizer(
@@ -135,7 +137,7 @@ impl Operator {
                             database,
                             |event| async {
                                 match event {
-                                    Event::Apply(object) => apply(object, databases).await,
+                                    Event::Apply(object) => apply(object, databases, client).await,
                                     Event::Cleanup(object) => cleanup(object, databases).await,
                                 }
                             },
@@ -159,14 +161,43 @@ impl Operator {
 
 /// Apply changes from the CRD
 #[instrument(skip_all)]
-async fn apply(object: Arc<Database>, databases: Databases) -> Result<Action> {
+async fn apply(object: Arc<Database>, databases: Databases, client: Client) -> Result<Action> {
     let name = name_for_database(&object)?;
+    let password = password_from_spec(&object, client.clone()).await?;
 
-    databases.ensure(&name, &object.spec.password).await?;
+    databases.ensure(&name, &password).await?;
 
     // TODO: expose connection details across namespaces
 
     Ok(Action::await_change())
+}
+
+/// Retrieve the password from the database spec
+#[instrument(skip_all)]
+async fn password_from_spec(object: &Database, client: Client) -> Result<String> {
+    match &object.spec.password {
+        DatabasePassword::Value(v) => Ok(v.clone()),
+        DatabasePassword::FromSecret(spec) => {
+            let secrets = Api::<Secret>::namespaced(client, &spec.namespace);
+            let secret = secrets.get(&spec.name).await.map_err(|e| match e {
+                kube::Error::Api(response) if response.code == 404 => Error::NoPassword,
+                e => Error::from(e),
+            })?;
+            info!(namespace = %spec.namespace, name = %spec.name, "found secret");
+
+            let password_bytes = secret
+                .data
+                .unwrap_or_default()
+                .remove(&spec.key)
+                .ok_or(Error::NoPassword)?;
+            info!(key = %spec.key, "found key in secret");
+            let password =
+                String::from_utf8(password_bytes.0).map_err(|_| Error::InvalidPassword)?;
+            debug!(%password);
+
+            Ok(password)
+        }
+    }
 }
 
 /// Cleanup databases from the CRD
@@ -216,12 +247,30 @@ async fn apply_crd(client: Client) -> Result<()> {
 struct DatabaseSpec {
     /// The password for the database
     #[validate(length(min = 1))]
-    password: String,
+    password: DatabasePassword,
     /// Whether to retain the database's data on deletion
     #[serde(default)]
     retain_on_delete: bool,
     /// Specification for the connection secret
     secret: DatabaseSecret,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DatabasePassword {
+    Value(#[validate(length(min = 1))] String),
+    FromSecret(DatabasePasswordSecret),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DatabasePasswordSecret {
+    /// The name of the secret to pull from
+    name: String,
+    /// The key to retrieve the password from
+    key: String,
+    /// The namespace the secret resides in
+    namespace: String,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -241,6 +290,10 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     #[error("resource does not have a name")]
     NoName,
+    #[error("could not find the password")]
+    NoPassword,
+    #[error("invalid password sequence, likely invalid utf-8")]
+    InvalidPassword,
     #[error(transparent)]
     Database(#[from] database::Error),
     #[error(transparent)]
