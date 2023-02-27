@@ -161,10 +161,8 @@ impl Operator {
 #[instrument(skip_all)]
 async fn apply(object: Arc<Database>, databases: Databases) -> Result<Action> {
     let name = name_for_database(&object)?;
-    // TODO: retrieve password from secret or spec
-    let password = String::from("testing");
 
-    databases.ensure(&name, &password).await?;
+    databases.ensure(&name, &object.spec.password).await?;
 
     // TODO: expose connection details across namespaces
 
@@ -216,6 +214,9 @@ async fn apply_crd(client: Client) -> Result<()> {
 )]
 #[serde(rename_all = "camelCase")]
 struct DatabaseSpec {
+    /// The password for the database
+    #[validate(length(min = 1))]
+    password: String,
     /// Whether to retain the database's data on deletion
     #[serde(default)]
     retain_on_delete: bool,

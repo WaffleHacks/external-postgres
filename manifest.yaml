@@ -3,6 +3,7 @@ kind: Database
 metadata:
   name: testing
 spec:
+  password: testing
   retainOnDelete: false
   secret:
     name: testing-database-secret
