@@ -29,24 +29,24 @@ jobs:
     env:
       RUST_BACKTRACE: full
       RUSTC_WRAPPER: sccache
-      SSCACHE_VERSION: v0.3.3
+      SCCACHE_VERSION: v0.3.3
       SCCACHE_CACHE_SIZE: 2G
-      SCCACHE_DIR: /home/runner/.cache/sscache
+      SCCACHE_DIR: /home/runner/.cache/sccache
       # SCCACHE_RECACHE: 1 # Uncomment this to clear cache, then comment it back out
     steps:
       - uses: actions/checkout@v3
 
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install sscache
+      - name: Install sccache
         run: |
           mkdir -p $HOME/.local/bin
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
           curl -L "$BASE_URL/$SCCACHE_VERSION/$FILE.tar.gz" | tar xz
-          mv -f $FILE/sscache $HOME/.local/bin/sscache
+          mv -f $FILE/sccache $HOME/.local/bin/sccache
         env:
           BASE_URL: https://github.com/mozilla/sccache/releases/download
-          FILE: sscache-${{ env.SSCACHE_VERSION }}-x86_64-unknown-linux-musl
+          FILE: sccache-${{ env.SCCACHE_VERSION }}-x86_64-unknown-linux-musl
 
       - name: Cache Cargo Registry
         uses: actions/cache@v3
@@ -58,21 +58,21 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: Cache sscache
+      - name: Cache sccache
         uses: actions/cache@v3
         with:
-          path: ${{ env.SSCACHE_DIR }}
-          key: ${{ runner.os }}-sscache-${{ hashFiles('**/Cargo.lock') }}
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ runner.os }}-sccache-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-sscache-
+            ${{ runner.os }}-sccache-
 
-      - name: Start sscache
-        run: sscache --start-server
+      - name: Start sccache
+        run: sccache --start-server
 
       - run: cargo check
       - run: cargo build --release
 
-      - name: Show sscache stats
-        run: sscache --show-stats
-      - name: Stop sscache
-        run: sscache --stop-server || true
+      - name: Show sccache stats
+        run: sccache --show-stats
+      - name: Stop sccache
+        run: sccache --stop-server || true
