@@ -16,7 +16,7 @@ mod error;
 #[derive(Clone)]
 pub struct AppState {
     databases: Databases,
-    operator: Operator,
+    _operator: Operator,
 }
 
 impl FromRef<AppState> for Databases {
@@ -39,7 +39,7 @@ pub fn router(databases: Databases, operator: Operator) -> Router {
         )
         .with_state(AppState {
             databases,
-            operator,
+            _operator: operator,
         })
 }
 
