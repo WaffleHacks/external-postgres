@@ -2,7 +2,7 @@
 on:  # yamllint disable-line rule:truthy
   push:
     tags:
-      - "v.*.*.*"
+      - "v*.*.*"
 
 jobs:
   build:
