@@ -1,10 +1,11 @@
-use super::{controller::Controller, database::Databases, kube::Kube};
+use super::{database::Databases, operator::Operator};
 use axum::{
     extract::{FromRef, State},
     http::{Request, StatusCode},
-    routing::{get, put},
+    routing::{delete, get},
     Router,
 };
+use sqlx::query;
 use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, MakeSpan, TraceLayer};
 use tracing::{span, Level, Span};
 use uuid::Uuid;
@@ -14,15 +15,8 @@ mod error;
 
 #[derive(Clone)]
 pub struct AppState {
-    controller: Controller,
     databases: Databases,
-    kube: Kube,
-}
-
-impl FromRef<AppState> for Controller {
-    fn from_ref(input: &AppState) -> Self {
-        input.controller.clone()
-    }
+    operator: Operator,
 }
 
 impl FromRef<AppState> for Databases {
@@ -32,14 +26,11 @@ impl FromRef<AppState> for Databases {
 }
 
 /// Build the router for the management interface
-pub fn router(controller: Controller, databases: Databases, kube: Kube) -> Router {
+pub fn router(databases: Databases, operator: Operator) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/databases", get(database::list).post(database::create))
-        .route(
-            "/databases/:database",
-            put(database::check).delete(database::delete),
-        )
+        .route("/databases", get(database::list).post(database::ensure))
+        .route("/databases/:database", delete(database::delete))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(MakeSpanWithId)
@@ -48,14 +39,14 @@ pub fn router(controller: Controller, databases: Databases, kube: Kube) -> Route
         )
         .with_state(AppState {
             databases,
-            controller,
-            kube,
+            operator,
         })
 }
 
 async fn health(State(databases): State<Databases>) -> error::Result<StatusCode> {
     let default = databases.get_default().await?;
-    default.ping().await?;
+    query!("SELECT 1 as test").fetch_one(&default).await?;
+    // default.ping().await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

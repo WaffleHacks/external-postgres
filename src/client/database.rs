@@ -1,6 +1,6 @@
 use crate::{
     constants::APPLICATION_NAME,
-    models::database::{CreateRequest, CreateResponse, DeleteOptions},
+    models::database::{CreateRequest, DeleteOptions},
 };
 use clap::Subcommand;
 use eyre::{bail, WrapErr};
@@ -13,15 +13,12 @@ use url::Url;
 pub enum Command {
     /// Get a list of all the managed databases
     List,
-    /// Create a new managed database
-    Create {
+    /// Ensure a database exists
+    Ensure {
         /// The database's name
         name: String,
-    },
-    /// Ensure a database is configured correctly
-    Check {
-        /// The database's name
-        name: String,
+        /// The password for the associated user
+        password: String,
     },
     /// Remove a database from management
     Remove {
@@ -38,12 +35,12 @@ pub async fn client(address: Url, command: Command) -> eyre::Result<()> {
 
     let request = match &command {
         Command::List => client.get(address.join("/databases")?).build(),
-        Command::Create { name } => client
+        Command::Ensure { name, password } => client
             .post(address.join("/databases")?)
-            .json(&CreateRequest { name: name.clone() })
-            .build(),
-        Command::Check { name } => client
-            .put(address.join(&format!("/databases/{name}"))?)
+            .json(&CreateRequest {
+                name: name.clone(),
+                password: password.clone(),
+            })
             .build(),
         Command::Remove { name, retain } => client
             .delete(address.join(&format!("/databases/{name}"))?)
@@ -71,14 +68,8 @@ pub async fn client(address: Url, command: Command) -> eyre::Result<()> {
             let databases = response.json::<Vec<String>>().await?;
             info!(?databases);
         }
-        Command::Create { .. } => {
-            let created = response.json::<CreateResponse>().await?;
-            match created.password {
-                Some(password) => info!(%password, "created database"),
-                None => info!("database already exists"),
-            }
-        }
-        _ => info!("successfully enqueued operation"),
+        Command::Ensure { .. } => info!("ensured database exists"),
+        Command::Remove { .. } => info!("database removed"),
     }
 
     Ok(())

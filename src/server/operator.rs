@@ -1,4 +1,4 @@
-use super::controller::Controller;
+use super::database::{self, Databases};
 use futures::StreamExt;
 use kube::{
     api::{Patch, PatchParams},
@@ -8,7 +8,7 @@ use kube::{
         controller::Action,
         finalizer::{finalizer, Event},
         wait::{self, await_condition, conditions},
-        Controller as Operator,
+        Controller,
     },
     Api, CustomResource, CustomResourceExt, ResourceExt,
 };
@@ -20,11 +20,11 @@ use tokio::{sync::oneshot, task::JoinHandle, time};
 use tracing::{debug, error, info, instrument};
 
 #[derive(Clone, Debug)]
-pub struct Kube(Arc<KubeInner>);
+pub struct Operator(Arc<KubeInner>);
 
 #[derive(Debug)]
 struct KubeInner {
-    controller: Controller,
+    databases: Databases,
     kubeconfig: PathBuf,
     kube_context: Option<String>,
     handle: Mutex<Option<KubeControllerHandle>>,
@@ -36,31 +36,31 @@ struct KubeControllerHandle {
     join: JoinHandle<()>,
 }
 
-impl Kube {
-    /// Create a new kube watcher
-    pub fn new(kubeconfig: PathBuf, kube_context: Option<String>, controller: Controller) -> Self {
+impl Operator {
+    /// Create a new kubernetes operator
+    pub fn new(kubeconfig: PathBuf, kube_context: Option<String>, databases: Databases) -> Self {
         let kubeconfig = shellexpand::tilde(&kubeconfig.as_os_str().to_string_lossy())
             .to_string()
             .into();
 
-        let kube = Kube(Arc::new(KubeInner {
-            controller,
+        let operator = Operator(Arc::new(KubeInner {
+            databases,
             kubeconfig,
             kube_context,
             handle: Mutex::default(),
         }));
 
         // Launch the controller if the kubeconfig exists
-        if kube.0.kubeconfig.exists() {
-            kube.launch_operator();
+        if operator.0.kubeconfig.exists() {
+            operator.spawn();
         } else {
-            tokio::spawn(kube.clone().wait_for_kubeconfig());
+            tokio::spawn(operator.clone().wait_for_kubeconfig());
         }
 
-        kube
+        operator
     }
 
-    /// Stop the kube watcher
+    /// Stop the operator
     pub async fn stop(self) {
         let handle = {
             let mut handle = self.0.handle.lock();
@@ -82,7 +82,7 @@ impl Kube {
         loop {
             if self.0.kubeconfig.exists() {
                 info!("kube config exists, launching controller");
-                self.launch_operator();
+                self.spawn();
             }
 
             debug!("kubeconfig not found, waiting...");
@@ -91,7 +91,7 @@ impl Kube {
     }
 
     /// Launch the operator in a separate task
-    fn launch_operator(&self) {
+    fn spawn(&self) {
         let (tx, rx) = oneshot::channel();
         let mut handle = self.0.handle.lock();
         *handle = Some(KubeControllerHandle {
@@ -119,24 +119,24 @@ impl Kube {
         }
 
         let databases = Api::<Database>::all(client.clone());
-        Operator::new(databases, Default::default())
+        Controller::new(databases, Default::default())
             .graceful_shutdown_on(async {
                 stop.await.unwrap();
                 debug!("shutdown signal received");
             })
             .run(
                 |database, _| {
-                    let databases = Api::<Database>::all(client.clone());
-                    let controller = self.0.controller.clone();
+                    let databases_api = Api::<Database>::all(client.clone());
+                    let databases = self.0.databases.clone();
                     async move {
                         finalizer(
-                            &databases,
+                            &databases_api,
                             "external-postgres.wafflehacks.cloud/cleanup",
                             database,
                             |event| async {
                                 match event {
-                                    Event::Apply(database) => apply(database, controller).await,
-                                    Event::Cleanup(database) => cleanup(database, controller).await,
+                                    Event::Apply(object) => apply(object, databases).await,
+                                    Event::Cleanup(object) => cleanup(object, databases).await,
                                 }
                             },
                         )
@@ -159,20 +159,25 @@ impl Kube {
 
 /// Apply changes from the CRD
 #[instrument(skip_all)]
-async fn apply(database: Arc<Database>, controller: Controller) -> Result<Action> {
-    let name = name_for_database(&database)?;
-    if let Some(_password) = controller.create(name).await {
-        // TODO: expose password to k8s services
-    }
+async fn apply(object: Arc<Database>, databases: Databases) -> Result<Action> {
+    let name = name_for_database(&object)?;
+    // TODO: retrieve password from secret or spec
+    let password = String::from("testing");
+
+    databases.ensure(&name, &password).await?;
+
+    // TODO: expose connection details across namespaces
 
     Ok(Action::await_change())
 }
 
 /// Cleanup databases from the CRD
 #[instrument(skip_all)]
-async fn cleanup(database: Arc<Database>, controller: Controller) -> Result<Action> {
-    let name = name_for_database(&database)?;
-    controller.remove(name, database.spec.retain_on_delete);
+async fn cleanup(object: Arc<Database>, databases: Databases) -> Result<Action> {
+    let name = name_for_database(&object)?;
+    databases
+        .remove(&name, object.spec.retain_on_delete)
+        .await?;
 
     Ok(Action::await_change())
 }
@@ -235,6 +240,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     #[error("resource does not have a name")]
     NoName,
+    #[error(transparent)]
+    Database(#[from] database::Error),
     #[error(transparent)]
     Kubernetes(#[from] kube::Error),
     #[error(transparent)]

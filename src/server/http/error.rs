@@ -13,13 +13,15 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error(transparent)]
     Database(#[from] database::Error),
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let message = format!("{self}");
         let code = match self {
-            Self::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Database(_) | Self::Sqlx(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
         let mut response = Json(ErrorResponse {

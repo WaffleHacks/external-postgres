@@ -1,25 +1,5 @@
 {
   "db": "PostgreSQL",
-  "020edf162ea9b1247794d86ae9c220c3151ef2c3397545a8812759ba58e077bb": {
-    "describe": {
-      "columns": [
-        {
-          "name": "oid",
-          "ordinal": 0,
-          "type_info": "Oid"
-        }
-      ],
-      "nullable": [
-        false
-      ],
-      "parameters": {
-        "Left": [
-          "Oid"
-        ]
-      }
-    },
-    "query": "SELECT oid FROM pg_catalog.pg_proc WHERE proname = 'user_lookup' AND pronamespace = $1"
-  },
   "0e80d486db4dc94088cd3a06c1ce769d7c3e707c9c4bc6b6ac02f73b3d7f5ceb": {
     "describe": {
       "columns": [],
@@ -110,24 +90,6 @@
     },
     "query": "SELECT\n    r.rolname as \"username!\",\n    r.rolcanlogin as \"can_login!\",\n    r.rolcreatedb as \"create_db!\",\n    r.rolcreaterole as \"create_role!\",\n    r.rolbypassrls as \"bypass_rls!\",\n    r.rolsuper as \"superuser!\"\nFROM pg_catalog.pg_roles r\nWHERE r.rolname = $1;\n"
   },
-  "a8763a5d11127a6becab4718e1c5eec7e1c1e841baf1bbd36b8723c7e2b404a5": {
-    "describe": {
-      "columns": [
-        {
-          "name": "oid",
-          "ordinal": 0,
-          "type_info": "Oid"
-        }
-      ],
-      "nullable": [
-        false
-      ],
-      "parameters": {
-        "Left": []
-      }
-    },
-    "query": "SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'pgbouncer'"
-  },
   "bc526e442532558557f425a39a5bf22c9fcfcd36200773c63ab4f4699e955c07": {
     "describe": {
       "columns": [
@@ -157,6 +119,42 @@
       }
     },
     "query": "-- Sets up the user lookup function\nCREATE OR REPLACE FUNCTION pgbouncer.user_lookup(in i_username text, out uname text, out phash text)\n    RETURNS record AS $$\nBEGIN\n    SELECT usename, passwd FROM pg_catalog.pg_shadow\n    WHERE usename = i_username INTO uname, phash;\n    RETURN;\nEND;\n$$ LANGUAGE plpgsql SECURITY DEFINER;\n"
+  },
+  "dbfb19a9bfc3a4aaa367c5e44698718392f36f4dc4ccff6f371c0a3a1674db18": {
+    "describe": {
+      "columns": [
+        {
+          "name": "test",
+          "ordinal": 0,
+          "type_info": "Int4"
+        }
+      ],
+      "nullable": [
+        null
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "SELECT 1 as test"
+  },
+  "e56811a476cf8a2466ea4196d3e12fe156cbeb025ed2ea7928eedb0e8205e6c4": {
+    "describe": {
+      "columns": [
+        {
+          "name": "oid",
+          "ordinal": 0,
+          "type_info": "Oid"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "SELECT p.oid FROM pg_catalog.pg_proc p\n    INNER JOIN pg_catalog.pg_namespace n\n        ON p.pronamespace = n.oid\n    WHERE p.proname = 'user_lookup' AND n.nspname = 'pgbouncer';\n"
   },
   "e8dc0b693e9d8a1f6ff56585c89b109655ba1d7e03dd66c01947ad089dd875be": {
     "describe": {

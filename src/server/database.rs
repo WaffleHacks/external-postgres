@@ -1,13 +1,12 @@
 use crate::constants::APPLICATION_NAME;
 use clap::Args;
 use parking_lot::RwLock;
-use rand::distributions::{Alphanumeric, DistString};
 use sqlx::{
     postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgSslMode},
-    query, query_file, query_file_as, ConnectOptions, Connection,
+    query, query_file, query_file_as, ConnectOptions,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
-use tracing::{error, info, instrument, log::LevelFilter, warn};
+use tracing::{debug, error, info, instrument, log::LevelFilter, warn};
 
 #[derive(Debug, Args)]
 pub struct Options {
@@ -99,7 +98,7 @@ impl Databases {
 
         // Ensure the connecting user has the correct permissions
         let connecting_user = query_file_as!(User, "queries/user-permissions.sql", connecting_user)
-            .fetch_one(&default.pool)
+            .fetch_one(&default)
             .await?;
         if !(connecting_user.create_role && connecting_user.create_db) {
             error!(
@@ -112,7 +111,7 @@ impl Databases {
 
         // Ensure the pgbouncer user exists
         let pgbouncer = query_file_as!(User, "queries/user-permissions.sql", "pgbouncer")
-            .fetch_optional(&default.pool)
+            .fetch_optional(&default)
             .await?;
 
         match pgbouncer {
@@ -132,10 +131,14 @@ impl Databases {
             None => {
                 warn!("pgbouncer user does not exist, creating...");
                 query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS")
-                    .execute(&default.pool)
+                    .execute(&default)
                     .await?;
             }
         }
+
+        // Setup the default database for pgbouncer authentication just in case
+        ensure_schema(&default).await?;
+        ensure_authentication_query(&default).await?;
 
         Ok(())
     }
@@ -146,70 +149,19 @@ impl Databases {
         pools.keys().map(|d| d.to_owned()).collect()
     }
 
-    /// Check if the given database is managed by external-postgres
-    pub fn is_managed(&self, database: &str) -> bool {
-        let pools = self.0.pools.read();
-        pools.contains_key(database)
-    }
-
-    /// Ensure the database and corresponding user exist, returns a connection to the database
-    /// and the user's password (if the user was just created)
-    #[instrument(skip(self))]
-    pub async fn ensure_exists(&self, database: &str) -> Result<(Database, Option<String>)> {
-        if database == self.0.default_dbname {
-            return Err(Error::DefaultDatabase);
-        }
-
-        let default = self.get_default().await?;
-
-        // Ensure the user exists
-        let user = query_file_as!(User, "queries/user-permissions.sql", database)
-            .fetch_optional(&default.pool)
-            .await?;
-        let password = match user {
-            Some(_) => None,
-            None => {
-                let password = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
-                query(&format!("CREATE USER {database} WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS PASSWORD '{password}'"))
-                    .execute(&default.pool)
-                    .await?;
-                Some(password)
-            }
-        };
-
-        // Ensure the database exists
-        let db = query!(
-            "SELECT oid FROM pg_catalog.pg_database WHERE datname = $1",
-            database
-        )
-        .fetch_optional(&default.pool)
-        .await?;
-
-        // Create the database or ensure it's owner is correct
-        let sql = match db {
-            Some(_) => format!("ALTER DATABASE {database} OWNER TO {database}"),
-            None => format!("CREATE DATABASE {database} WITH OWNER {database}"),
-        };
-        query(&sql).execute(&default.pool).await?;
-
-        // Acquire the database pool
-        let pool = self.get(database).await?;
-        Ok((pool, password))
-    }
-
-    /// Get the default database
+    /// Get a connection to the default database
     #[instrument(skip_all)]
-    pub(crate) async fn get_default(&self) -> Result<Database> {
+    pub(crate) async fn get_default(&self) -> Result<PgPool> {
         self.get(&self.0.default_dbname).await
     }
 
-    /// Fetch a connection pool for the specified database
+    /// Get a connection to the specified database
     #[instrument(skip(self))]
-    pub async fn get(&self, database: &str) -> Result<Database> {
+    async fn get(&self, database: &str) -> Result<PgPool> {
         {
             let pools = self.0.pools.read();
             if let Some(pool) = pools.get(database) {
-                return Ok(Database { pool: pool.clone() });
+                return Ok(pool.clone());
             }
         }
 
@@ -221,10 +173,11 @@ impl Databases {
             pools.insert(database.to_string(), stored);
         }
 
-        Ok(Database { pool })
+        Ok(pool)
     }
 
     /// Open a new connection to the database
+    #[instrument(skip(self))]
     async fn open(&self, database: &str) -> Result<PgPool> {
         let options = self.0.options.clone().database(database);
 
@@ -242,20 +195,43 @@ impl Databases {
         Ok(pool)
     }
 
+    /// Ensure the specified database exists and is configured properly
+    #[instrument(skip(self, password))]
+    pub async fn ensure(&self, database: &str, password: &str) -> Result<()> {
+        if database == self.0.default_dbname {
+            return Err(Error::DefaultDatabase);
+        }
+
+        // Setup the database and corresponding user
+        let mut default = self.get_default().await?;
+        ensure_user(database, password, &mut default).await?;
+        ensure_database(database, &mut default).await?;
+        info!("setup database and user");
+
+        // Configure the database for authentication
+        let mut connection = self.get(database).await?;
+        ensure_schema(&mut connection).await?;
+        ensure_authentication_query(&mut connection).await?;
+
+        Ok(())
+    }
+
     /// Remove a database from being managed. If `retain` is true, the database will not be dropped.
+    #[instrument]
     pub async fn remove(&self, database: &str, retain: bool) -> Result<()> {
         if database == self.0.default_dbname {
             return Err(Error::DefaultDatabase);
         }
 
-        let pool = {
+        let pool = match {
             let mut pools = self.0.pools.write();
             pools.remove(database)
+        } {
+            Some(p) => p,
+            None => return Ok(()),
         };
 
-        if let Some(pool) = pool {
-            pool.close().await;
-        }
+        pool.close().await;
 
         let default = self.get_default().await?;
 
@@ -267,12 +243,14 @@ impl Databases {
         } else {
             format!("DROP DATABASE {database}")
         };
-        query(&sql).execute(&default.pool).await?;
+        query(&sql).execute(&default).await?;
+        info!("removed database");
 
         // Remove the user
         query(&format!("DROP USER {database}"))
-            .execute(&default.pool)
+            .execute(&default)
             .await?;
+        info!("removed user");
 
         Ok(())
     }
@@ -295,62 +273,82 @@ fn non_empty_optional(s: &String) -> Option<&String> {
     }
 }
 
-/// A convince wrapper around a connection pool
-#[derive(Clone, Debug)]
-pub struct Database {
-    pool: PgPool,
+/// Ensure the user exists with the given password
+#[instrument(skip(password, pool))]
+async fn ensure_user(name: &str, password: &str, pool: &PgPool) -> Result<()> {
+    let user = query_file_as!(User, "queries/user-permissions.sql", name)
+        .fetch_optional(pool)
+        .await?;
+    debug!(?user);
+
+    let sql = match user {
+        Some(_) => format!("ALTER USER {name} WITH PASSWORD '{password}'"),
+        None => format!("CREATE USER {name} WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS PASSWORD '{password}'"),
+    };
+    query(&sql).execute(pool).await?;
+    info!("upserted user");
+
+    Ok(())
 }
 
-impl Database {
-    /// Test the database connection
-    #[instrument(skip_all)]
-    pub(crate) async fn ping(&self) -> Result<()> {
-        let mut connection = self.pool.acquire().await?;
-        connection.ping().await?;
+/// Ensure the database exists
+#[instrument(skip(pool))]
+async fn ensure_database(name: &str, pool: &PgPool) -> Result<()> {
+    let database = query!(
+        "SELECT oid FROM pg_catalog.pg_database WHERE datname = $1",
+        name
+    )
+    .fetch_optional(pool)
+    .await?;
+    debug!(exists = ?database.is_some());
 
-        Ok(())
+    // Create the database or ensure it's owner is correct
+    let sql = match database {
+        Some(_) => format!("ALTER DATABASE {name} OWNER TO {name}"),
+        None => format!("CREATE DATABASE {name} WITH OWNER {name}"),
+    };
+    query(&sql).execute(pool).await?;
+
+    Ok(())
+}
+
+/// Ensure the pgbouncer schema exists and has the proper permissions
+#[instrument(skip_all)]
+async fn ensure_schema(pool: &PgPool) -> Result<()> {
+    query!("CREATE SCHEMA IF NOT EXISTS pgbouncer")
+        .execute(pool)
+        .await?;
+
+    query!("GRANT USAGE ON SCHEMA pgbouncer TO pgbouncer")
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Ensure the authentication lookup function exists and has the proper permissions
+#[instrument(skip_all)]
+async fn ensure_authentication_query(pool: &PgPool) -> Result<()> {
+    let user_lookup_function = query_file!("queries/authentication-query-exists.sql")
+        .fetch_optional(pool)
+        .await?;
+    debug!(exists = ?user_lookup_function.is_some());
+    if user_lookup_function.is_none() {
+        query_file!("queries/authentication-query-function.sql")
+            .execute(pool)
+            .await?;
     }
+    info!("created authentication lookup if not exists");
 
-    /// Ensure the pgbouncer schema exists and has the proper permissions
-    #[instrument(skip_all)]
-    pub async fn ensure_schema(&self) -> Result<()> {
-        query!("CREATE SCHEMA IF NOT EXISTS pgbouncer")
-            .execute(&self.pool)
-            .await?;
+    query!("REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM public, pgbouncer")
+        .execute(pool)
+        .await?;
+    query!("GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO pgbouncer")
+        .execute(pool)
+        .await?;
+    info!("updated lookup function permissions");
 
-        query!("GRANT USAGE ON SCHEMA pgbouncer TO pgbouncer")
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Ensure the authentication function exists and has the proper permissions
-    #[instrument(skip_all)]
-    pub async fn ensure_authentication_query(&self) -> Result<()> {
-        let schema = query!("SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'pgbouncer'")
-            .fetch_one(&self.pool)
-            .await?;
-        let user_lookup =
-            query!("SELECT oid FROM pg_catalog.pg_proc WHERE proname = 'user_lookup' AND pronamespace = $1", schema.oid)
-                .fetch_optional(&self.pool)
-                .await?;
-
-        if user_lookup.is_none() {
-            query_file!("queries/authentication-query-function.sql")
-                .execute(&self.pool)
-                .await?;
-        }
-
-        query!("REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM public, pgbouncer")
-            .execute(&self.pool)
-            .await?;
-        query!("GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO pgbouncer")
-            .execute(&self.pool)
-            .await?;
-
-        Ok(())
-    }
+    Ok(())
 }
 
 type Result<T> = std::result::Result<T, Error>;
