@@ -572,7 +572,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "parking_lot 0.12.1",
- "rand",
  "reqwest",
  "schemars",
  "serde",

@@ -17,7 +17,12 @@ pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
     let databases = Databases::new(&args.database)
         .await
         .wrap_err("failed to connect to database")?;
-    let kube = Operator::new(args.kubeconfig, args.kube_context, databases.clone());
+    let kube = Operator::new(
+        args.kubeconfig,
+        args.kube_context,
+        args.operator,
+        databases.clone(),
+    );
 
     // Launch the server
     info!(address = %args.management_address, "listening and ready to handle requests");
@@ -34,6 +39,9 @@ pub async fn launch(args: ServerArgs) -> eyre::Result<()> {
 pub struct ServerArgs {
     #[command(flatten)]
     database: database::Options,
+
+    #[command(flatten)]
+    operator: operator::ConnectionInfo,
 
     /// The address for the management server to listen on
     #[arg(

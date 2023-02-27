@@ -1,6 +1,8 @@
 use super::database::{self, Databases};
+use clap::Args;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Secret;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::{
     api::{Patch, PatchParams},
     client::Client,
@@ -16,9 +18,52 @@ use kube::{
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use sqlx::postgres::PgSslMode;
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{sync::oneshot, task::JoinHandle, time};
 use tracing::{debug, error, info, instrument};
+
+#[derive(Clone, Debug, Args)]
+pub struct ConnectionInfo {
+    /// The host for clients within the cluster to connect with
+    #[arg(
+        long = "kube-database-host",
+        default_value = "postgres",
+        env = "KUBE_DATABASE_HOST"
+    )]
+    pub remote_host: String,
+
+    /// The port of the server to connect to
+    #[arg(
+        long = "kube-database-port",
+        default_value_t = 5432,
+        env = "KUBE_DATABASE_PORT"
+    )]
+    pub remote_port: u16,
+
+    /// The SSL connection mode to use
+    #[arg(
+        long = "kube-database-ssl-mode",
+        default_value = "prefer",
+        env = "KUBE_DATABASE_SSL_MODE"
+    )]
+    pub sslmode: PgSslMode,
+}
+
+impl ConnectionInfo {
+    fn into_secret_data(self) -> BTreeMap<String, String> {
+        let mut data = BTreeMap::new();
+
+        data.insert(String::from("PGHOST"), self.remote_host);
+        data.insert(String::from("PGPORT"), format!("{}", self.remote_port));
+        data.insert(
+            String::from("PGSSLMODE"),
+            format!("{:?}", self.sslmode).to_lowercase(),
+        );
+
+        data
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Operator(Arc<KubeInner>);
@@ -29,6 +74,7 @@ struct KubeInner {
     kubeconfig: PathBuf,
     kube_context: Option<String>,
     handle: Mutex<Option<KubeControllerHandle>>,
+    secret_data: BTreeMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -39,7 +85,12 @@ struct KubeControllerHandle {
 
 impl Operator {
     /// Create a new kubernetes operator
-    pub fn new(kubeconfig: PathBuf, kube_context: Option<String>, databases: Databases) -> Self {
+    pub fn new(
+        kubeconfig: PathBuf,
+        kube_context: Option<String>,
+        connection_info: ConnectionInfo,
+        databases: Databases,
+    ) -> Self {
         let kubeconfig = shellexpand::tilde(&kubeconfig.as_os_str().to_string_lossy())
             .to_string()
             .into();
@@ -49,6 +100,7 @@ impl Operator {
             kubeconfig,
             kube_context,
             handle: Mutex::default(),
+            secret_data: connection_info.into_secret_data(),
         }));
 
         // Launch the controller if the kubeconfig exists
@@ -129,7 +181,10 @@ impl Operator {
                 |database, _| {
                     let databases_api = Api::<Database>::all(client.clone());
                     let client = client.clone();
+
+                    let base_secret_data = self.0.secret_data.clone();
                     let databases = self.0.databases.clone();
+
                     async move {
                         finalizer(
                             &databases_api,
@@ -137,8 +192,12 @@ impl Operator {
                             database,
                             |event| async {
                                 match event {
-                                    Event::Apply(object) => apply(object, databases, client).await,
-                                    Event::Cleanup(object) => cleanup(object, databases).await,
+                                    Event::Apply(object) => {
+                                        apply(object, databases, base_secret_data, client).await
+                                    }
+                                    Event::Cleanup(object) => {
+                                        cleanup(object, databases, client).await
+                                    }
                                 }
                             },
                         )
@@ -161,13 +220,56 @@ impl Operator {
 
 /// Apply changes from the CRD
 #[instrument(skip_all)]
-async fn apply(object: Arc<Database>, databases: Databases, client: Client) -> Result<Action> {
+async fn apply(
+    object: Arc<Database>,
+    databases: Databases,
+    mut secret_data: BTreeMap<String, String>,
+    client: Client,
+) -> Result<Action> {
     let name = name_for_database(&object)?;
     let password = password_from_spec(&object, client.clone()).await?;
 
     databases.ensure(&name, &password).await?;
+    info!("ensured database exists");
 
-    // TODO: expose connection details across namespaces
+    // Populate the secret data
+    secret_data.insert(String::from("PGUSER"), name.clone());
+    secret_data.insert(String::from("PGPASSWORD"), password.clone());
+    secret_data.insert(String::from("PGDATABASE"), name.clone());
+
+    secret_data.insert(
+        String::from("DATABASE_URL"),
+        format!(
+            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
+            name,
+            password,
+            secret_data.get("PGHOST").unwrap(),
+            secret_data.get("PGPORT").unwrap(),
+            name,
+            secret_data.get("PGSSLMODE").unwrap()
+        ),
+    );
+
+    let secret_name = secret_name_for_database(&object);
+    for namespace in &object.spec.secret.namespaces {
+        let secrets = Api::<Secret>::namespaced(client.clone(), namespace);
+        secrets
+            .patch(
+                &secret_name,
+                &PatchParams::apply("external-postgres.wafflehacks.cloud").force(),
+                &Patch::Apply(&Secret {
+                    metadata: ObjectMeta {
+                        name: secret_name.clone().into(),
+                        ..Default::default()
+                    },
+                    string_data: secret_data.clone().into(),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        info!(%namespace, "added secret to namespace");
+    }
 
     Ok(Action::await_change())
 }
@@ -202,17 +304,35 @@ async fn password_from_spec(object: &Database, client: Client) -> Result<String>
 
 /// Cleanup databases from the CRD
 #[instrument(skip_all)]
-async fn cleanup(object: Arc<Database>, databases: Databases) -> Result<Action> {
+async fn cleanup(object: Arc<Database>, databases: Databases, client: Client) -> Result<Action> {
     let name = name_for_database(&object)?;
     databases
         .remove(&name, object.spec.retain_on_delete)
         .await?;
+
+    let secret_name = secret_name_for_database(&object);
+    for namespace in &object.spec.secret.namespaces {
+        let secrets = Api::<Secret>::namespaced(client.clone(), namespace);
+        secrets.delete(&secret_name, &Default::default()).await?;
+
+        info!(%namespace, "removed secret from namespace");
+    }
 
     Ok(Action::await_change())
 }
 
 fn name_for_database(database: &Database) -> Result<String> {
     database.metadata.name.clone().ok_or(Error::NoName)
+}
+
+fn secret_name_for_database(database: &Database) -> String {
+    let name = name_for_database(database).unwrap();
+    database
+        .spec
+        .secret
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("database-{name}-secret"))
 }
 
 #[instrument(skip_all)]

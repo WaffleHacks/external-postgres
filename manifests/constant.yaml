@@ -9,6 +9,6 @@ spec:
     value: testing
   retainOnDelete: false
   secret:
-    name: testing-database-secret
+    name: constant-database-secret
     namespaces:
       - default
