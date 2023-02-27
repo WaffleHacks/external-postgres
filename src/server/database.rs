@@ -203,15 +203,15 @@ impl Databases {
         }
 
         // Setup the database and corresponding user
-        let mut default = self.get_default().await?;
-        ensure_user(database, password, &mut default).await?;
-        ensure_database(database, &mut default).await?;
+        let default = self.get_default().await?;
+        ensure_user(database, password, &default).await?;
+        ensure_database(database, &default).await?;
         info!("setup database and user");
 
         // Configure the database for authentication
-        let mut connection = self.get(database).await?;
-        ensure_schema(&mut connection).await?;
-        ensure_authentication_query(&mut connection).await?;
+        let connection = self.get(database).await?;
+        ensure_schema(&connection).await?;
+        ensure_authentication_query(&connection).await?;
 
         Ok(())
     }
