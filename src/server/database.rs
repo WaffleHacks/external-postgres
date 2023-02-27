@@ -184,11 +184,13 @@ impl Databases {
         )
         .fetch_optional(&default.pool)
         .await?;
-        if db.is_none() {
-            query(&format!("CREATE DATABASE {database} WITH OWNER {database}"))
-                .execute(&default.pool)
-                .await?;
-        }
+
+        // Create the database or ensure it's owner is correct
+        let sql = match db {
+            Some(_) => format!("ALTER DATABASE {database} OWNER TO {database}"),
+            None => format!("CREATE DATABASE {database} WITH OWNER {database}"),
+        };
+        query(&sql).execute(&default.pool).await?;
 
         // Acquire the database pool
         let pool = self.get(database).await?;
