@@ -170,7 +170,7 @@ impl Databases {
             Some(_) => None,
             None => {
                 let password = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
-                query(&format!("CREATE USER {database} WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS"))
+                query(&format!("CREATE USER {database} WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS PASSWORD '{password}'"))
                     .execute(&default.pool)
                     .await?;
                 Some(password)
