@@ -70,6 +70,7 @@ jobs:
         run: sccache --start-server
 
       - run: cargo check
+      - run: cargo clippy -- -D warnings
 
       - name: Show sccache stats
         run: sccache --show-stats
