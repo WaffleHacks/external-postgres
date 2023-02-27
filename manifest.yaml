@@ -1,0 +1,10 @@
+apiVersion: external-postgres.wafflehacks.cloud/v1
+kind: Database
+metadata:
+  name: testing
+spec:
+  retainOnDelete: false
+  secret:
+    name: testing-database-secret
+    namespaces:
+      - default

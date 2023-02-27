@@ -1,4 +1,4 @@
-use super::{controller::Controller, database::Databases};
+use super::{controller::Controller, database::Databases, kube::Kube};
 use axum::{
     extract::{FromRef, State},
     http::{Request, StatusCode},
@@ -16,6 +16,7 @@ mod error;
 pub struct AppState {
     controller: Controller,
     databases: Databases,
+    kube: Kube,
 }
 
 impl FromRef<AppState> for Controller {
@@ -31,7 +32,7 @@ impl FromRef<AppState> for Databases {
 }
 
 /// Build the router for the management interface
-pub fn router(controller: Controller, databases: Databases) -> Router {
+pub fn router(controller: Controller, databases: Databases, kube: Kube) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/databases", get(database::list).post(database::create))
@@ -48,6 +49,7 @@ pub fn router(controller: Controller, databases: Databases) -> Router {
         .with_state(AppState {
             databases,
             controller,
+            kube,
         })
 }
 
