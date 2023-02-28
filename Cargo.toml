@@ -12,8 +12,8 @@ license-file = "LICENSE.md"
 [lib]
 
 [dependencies]
-axum = { version = "0.6.8", default-features = false, features = ["http1", "http2", "json", "query", "tokio"] }
-clap = { version = "4.1.6", features = ["derive", "env"] }
+axum = { version = "0.6.9", default-features = false, features = ["http1", "http2", "json", "query", "tokio"] }
+clap = { version = "4.1.7", features = ["derive", "env"] }
 color-eyre = "0.6.2"
 dotenvy = "0.15.6"
 eyre = "0.6.8"
@@ -22,7 +22,7 @@ k8s-openapi = { version = "0.17.0", features = ["v1_25"] }
 kube = { version = "0.79.0", features = ["client", "derive", "runtime"] }
 parking_lot = { version = "0.12.1", features = ["arc_lock"] }
 reqwest = { version = "0.11.14", default-features = false, features = ["json", "native-tls"] }
-schemars = "0.8.11"
+schemars = "0.8.12"
 serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.93"
 shellexpand = "3.0.0"
