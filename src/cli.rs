@@ -43,4 +43,6 @@ pub enum Command {
     /// Manage the operator
     #[command(subcommand)]
     Operator(OperatorCommand),
+    /// Check if the operator is health
+    Health,
 }

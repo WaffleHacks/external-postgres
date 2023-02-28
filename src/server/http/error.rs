@@ -1,10 +1,9 @@
-use crate::server::database;
+use crate::{models::ErrorResponse, server::database};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use serde::Serialize;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -33,10 +32,4 @@ impl IntoResponse for Error {
         *response.status_mut() = code;
         response
     }
-}
-
-#[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    code: u16,
-    message: String,
 }

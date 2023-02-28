@@ -57,7 +57,6 @@ pub fn router(databases: Databases, operator: Operator) -> Router {
 async fn health(State(databases): State<Databases>) -> error::Result<StatusCode> {
     let default = databases.get_default().await?;
     query!("SELECT 1 as test").fetch_one(&default).await?;
-    // default.ping().await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
