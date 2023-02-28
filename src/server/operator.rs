@@ -1,10 +1,9 @@
 use super::database::{self, Databases};
 use clap::Args;
 use futures::StreamExt;
-use k8s_openapi::api::core::v1::Secret;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::{api::core::v1::Secret, apimachinery::pkg::apis::meta::v1::ObjectMeta};
 use kube::{
-    api::{Patch, PatchParams},
+    api::{DeleteParams, ListParams, Patch, PatchParams},
     client::Client,
     config::{Config, KubeConfigOptions, Kubeconfig},
     runtime::{
@@ -192,7 +191,7 @@ impl Operator {
         }
 
         let databases = Api::<Database>::all(client.clone());
-        Controller::new(databases, Default::default())
+        Controller::new(databases, ListParams::default())
             .graceful_shutdown_on(async {
                 stop.await.unwrap();
                 debug!("shutdown signal received");
@@ -333,7 +332,9 @@ async fn cleanup(object: Arc<Database>, databases: Databases, client: Client) ->
     let secret_name = secret_name_for_database(&object);
     for namespace in &object.spec.secret.namespaces {
         let secrets = Api::<Secret>::namespaced(client.clone(), namespace);
-        secrets.delete(&secret_name, &Default::default()).await?;
+        secrets
+            .delete(&secret_name, &DeleteParams::default())
+            .await?;
 
         info!(%namespace, "removed secret from namespace");
     }

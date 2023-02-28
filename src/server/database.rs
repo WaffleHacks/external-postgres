@@ -114,26 +114,23 @@ impl Databases {
             .fetch_optional(&default)
             .await?;
 
-        match pgbouncer {
-            Some(user) => {
-                info!(
-                    %user.can_login,
-                    %user.create_db,
-                    %user.create_role,
-                    %user.bypass_rls,
-                    %user.superuser,
-                    "pgbouncer user already exists"
-                );
-                if !user.can_login {
-                    warn!("pgbouncer user should be able to login");
-                }
+        if let Some(user) = pgbouncer {
+            info!(
+                %user.can_login,
+                %user.create_db,
+                %user.create_role,
+                %user.bypass_rls,
+                %user.superuser,
+                "pgbouncer user already exists"
+            );
+            if !user.can_login {
+                warn!("pgbouncer user should be able to login");
             }
-            None => {
-                warn!("pgbouncer user does not exist, creating...");
-                query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS")
-                    .execute(&default)
-                    .await?;
-            }
+        } else {
+            warn!("pgbouncer user does not exist, creating...");
+            query!("CREATE USER pgbouncer WITH LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS")
+                .execute(&default)
+                .await?;
         }
 
         // Setup the default database for pgbouncer authentication just in case
@@ -146,7 +143,7 @@ impl Databases {
     /// Get a list of all the managed databases
     pub fn managed_databases(&self) -> Vec<String> {
         let pools = self.0.pools.read();
-        pools.keys().map(|d| d.to_owned()).collect()
+        pools.keys().map(Clone::clone).collect()
     }
 
     /// Get a connection to the default database
@@ -223,13 +220,10 @@ impl Databases {
             return Err(Error::DefaultDatabase);
         }
 
-        let pool = match {
+        let Some(pool) = ({
             let mut pools = self.0.pools.write();
             pools.remove(database)
-        } {
-            Some(p) => p,
-            None => return Ok(()),
-        };
+        }) else { return Ok(()) };
 
         pool.close().await;
 
