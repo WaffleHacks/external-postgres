@@ -1,6 +1,7 @@
 [Unit]
 Description="WaffleHacks external-postgres operator"
-Requires=network-online.target
+Requires=network-online.target postgresql.service
+After=postgresql.service
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
@@ -9,7 +10,7 @@ Type=simple
 User=postgres
 Group=postgres
 EnvironmentFile=-/etc/external-postgres/.env
-ExecStart=/usr/local/bin/external-postgres
+ExecStart=/usr/bin/external-postgres
 ProtectSystem=full
 ProtectHome=read-only
 PrivateTmp=yes

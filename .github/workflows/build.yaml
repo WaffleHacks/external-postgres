@@ -53,14 +53,22 @@ jobs:
       - name: Start sccache
         run: sccache --start-server
 
+      - run: cargo install cargo-deb
+
       - run: cargo build --release
+      - run: cargo deb
+
+      - name: Get package version
+        run: |
+          version=$(./target/release/external-postgres -V | awk '{ print $2 }')
+          mv ./target/release/external-postgres ./target/release/external-postgres-$version-linux-amd64
 
       - uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
           files: |
-            target/release/external-postgres
-            systemd/*
+            target/release/external-postgres-*
+            target/debian/*.deb
 
       - name: Show sccache stats
         run: sccache --show-stats

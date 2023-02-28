@@ -1,9 +1,13 @@
 [package]
 name = "external-postgres"
+description = "Manage an external PostgreSQL server from K8S"
+authors = ["WaffleHacks <technology@wafflehacks.org>"]
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+repository = "https://github.com/WaffleHacks/external-postgres"
+readme = "README.md"
+license-file = "LICENSE.md"
 
 [lib]
 
@@ -31,3 +35,18 @@ tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "registry"] }
 url = "2.3.1"
 uuid = { version = "1.3.0", features = ["v4"] }
+
+[package.metadata.deb]
+name = "external-postgres"
+maintainer-scripts = "debian/"
+separate-debug-symbols = true
+assets = [
+    ["target/release/external-postgres", "/usr/bin/external-postgres", "755"],
+    [".env.example", "/etc/external-postgres/.env", "644"],
+    ["README.md", "/usr/share/doc/external-postgres/README.md", "644"]
+]
+
+[package.metadata.deb.systemd-units]
+start = true
+enable = true
+restart-after-upgrade = true
