@@ -2,7 +2,7 @@
 name = "external-postgres"
 description = "Manage an external PostgreSQL server from K8S"
 authors = ["WaffleHacks <technology@wafflehacks.org>"]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 repository = "https://github.com/WaffleHacks/external-postgres"
