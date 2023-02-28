@@ -20,8 +20,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgSslMode;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
-use tokio::{sync::oneshot, task::JoinHandle, time};
-use tracing::{debug, error, info, instrument};
+use tokio::{sync::oneshot, task::JoinHandle};
+use tracing::{debug, error, info, instrument, warn};
 
 #[derive(Clone, Debug, Args)]
 pub struct ConnectionInfo {
@@ -85,6 +85,7 @@ struct KubeControllerHandle {
 
 impl Operator {
     /// Create a new kubernetes operator
+    #[instrument(name = "operator", skip(connection_info, databases))]
     pub fn new(
         kubeconfig: PathBuf,
         kube_context: Option<String>,
@@ -105,16 +106,38 @@ impl Operator {
 
         // Launch the controller if the kubeconfig exists
         if operator.0.kubeconfig.exists() {
+            info!("kubeconfig exists, launching...");
             operator.spawn();
         } else {
-            tokio::spawn(operator.clone().wait_for_kubeconfig());
+            warn!(path = %operator.0.kubeconfig.display(), "could not find kubeconfig");
+            info!("run `external-postgres operator enable` once the kubeconfig exists");
         }
 
         operator
     }
 
+    /// Try to spawn the operator
+    #[instrument(skip_all, fields(path = %self.0.kubeconfig.display()))]
+    pub fn start(&self) -> bool {
+        {
+            let handle = self.0.handle.lock();
+            if handle.is_some() {
+                return true;
+            }
+        }
+
+        let exists = self.0.kubeconfig.exists();
+        if exists {
+            info!("kubeconfig exists, launching controller");
+            self.spawn();
+        }
+
+        exists
+    }
+
     /// Stop the operator
-    pub async fn stop(self) {
+    #[instrument(skip_all)]
+    pub async fn stop(&self) -> bool {
         let handle = {
             let mut handle = self.0.handle.lock();
             handle.take()
@@ -124,23 +147,20 @@ impl Operator {
             handle.stop.send(()).unwrap();
 
             if let Err(error) = handle.join.await {
+                // Simply log the error, as there's nothing we can do about it
                 error!(%error, "failed to stop kube controller");
             }
+
+            true
+        } else {
+            false
         }
     }
 
-    /// Wait for the kubeconfig at the specified path to exist
-    #[instrument(skip_all, fields(path = %self.0.kubeconfig.display()))]
-    async fn wait_for_kubeconfig(self) {
-        loop {
-            if self.0.kubeconfig.exists() {
-                info!("kube config exists, launching controller");
-                self.spawn();
-            }
-
-            debug!("kubeconfig not found, waiting...");
-            time::sleep(Duration::from_secs(5)).await;
-        }
+    /// Check whether the operator is running
+    pub fn status(&self) -> bool {
+        let handle = self.0.handle.lock();
+        handle.is_some()
     }
 
     /// Launch the operator in a separate task

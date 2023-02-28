@@ -12,16 +12,23 @@ use uuid::Uuid;
 
 mod database;
 mod error;
+mod operator;
 
 #[derive(Clone)]
 pub struct AppState {
     databases: Databases,
-    _operator: Operator,
+    operator: Operator,
 }
 
 impl FromRef<AppState> for Databases {
     fn from_ref(input: &AppState) -> Self {
         input.databases.clone()
+    }
+}
+
+impl FromRef<AppState> for Operator {
+    fn from_ref(input: &AppState) -> Self {
+        input.operator.clone()
     }
 }
 
@@ -31,6 +38,10 @@ pub fn router(databases: Databases, operator: Operator) -> Router {
         .route("/health", get(health))
         .route("/databases", get(database::list).post(database::ensure))
         .route("/databases/:database", delete(database::delete))
+        .route(
+            "/operator/state",
+            get(operator::get_state).post(operator::change_state),
+        )
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(MakeSpanWithId)
@@ -39,7 +50,7 @@ pub fn router(databases: Databases, operator: Operator) -> Router {
         )
         .with_state(AppState {
             databases,
-            _operator: operator,
+            operator,
         })
 }
 

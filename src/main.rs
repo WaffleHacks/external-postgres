@@ -15,6 +15,7 @@ async fn main() -> eyre::Result<()> {
     match args.command {
         Command::Run(args) => server::launch(args).await?,
         Command::Database(command) => client::database(args.address, command).await?,
+        Command::Operator(command) => client::operator(args.address, command).await?,
     }
 
     Ok(())

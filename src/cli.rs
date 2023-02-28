@@ -1,4 +1,7 @@
-use crate::{client::DatabaseCommand, server::ServerArgs};
+use crate::{
+    client::{DatabaseCommand, OperatorCommand},
+    server::ServerArgs,
+};
 use clap::{Parser, Subcommand};
 use std::fmt::{Debug, Formatter};
 use tracing::Level;
@@ -37,4 +40,7 @@ pub enum Command {
     /// Manage databases
     #[command(subcommand)]
     Database(DatabaseCommand),
+    /// Manage the operator
+    #[command(subcommand)]
+    Operator(OperatorCommand),
 }

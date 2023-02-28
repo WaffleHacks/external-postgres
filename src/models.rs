@@ -12,3 +12,29 @@ pub mod database {
         pub retain: Option<bool>,
     }
 }
+
+pub mod operator {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct StateResponse {
+        pub running: bool,
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct ChangeStateRequest {
+        pub desired: Status,
+    }
+
+    #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum Status {
+        Enabled,
+        Disabled,
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct ChangeStateResponse {
+        pub success: bool,
+    }
+}
