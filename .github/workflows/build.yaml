@@ -60,6 +60,7 @@ jobs:
           generate_release_notes: true
           files: |
             target/release/external-postgres
+            systemd/*
 
       - name: Show sccache stats
         run: sccache --show-stats
