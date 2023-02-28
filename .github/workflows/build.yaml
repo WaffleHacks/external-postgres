@@ -7,7 +7,7 @@ on:  # yamllint disable-line rule:truthy
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     env:
       RUST_BACKTRACE: full
       RUSTC_WRAPPER: sccache
